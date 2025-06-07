@@ -1,36 +1,168 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SecureVault - パスワードマネージャー
 
-## Getting Started
+SecureVaultは、安全で美しいパスワード管理アプリケーションです。PIN認証とクライアントサイド暗号化により、あなたの大切なパスワードを保護します。
 
-First, run the development server:
+## 🌟 主な機能
 
+### セキュリティ
+- **PIN認証システム**: メール + PINコードによる強固な認証
+- **クライアントサイド暗号化**: AES暗号化でデータを安全に保護
+- **PBKDF2キー導出**: 100,000回の反復によるセキュアなキー生成
+- **Row Level Security**: Supabaseの行レベルセキュリティで多層防御
+
+### パスワード管理
+- **CRUD操作**: パスワードエントリの作成、表示、更新、削除
+- **パスワード生成器**: 強力なパスワードの自動生成（16文字、カスタマイズ可能）
+- **パスワード強度チェック**: リアルタイムでパスワード強度を評価
+- **コピー機能**: ワンクリックでクリップボードにコピー
+
+### 組織機能
+- **カテゴリ管理**: ドロップダウンでカテゴリを選択、新規作成可能
+- **タグシステム**: 色分け対応のタグで効率的な分類
+- **検索・フィルター**: サービス名、ユーザー名、タグで高速検索
+- **カテゴリフィルター**: カテゴリによる絞り込み表示
+
+### ユーザー体験
+- **ユーザー識別情報**: ユーザー名/メール/IDを選択可能
+- **レスポンシブデザイン**: デスクトップ・モバイル対応
+- **美しいUI**: モダンなグラデーションとアニメーション
+- **ダークパターン対応**: カスタムスクロールバーと滑らかなアニメーション
+
+## 🛠️ 技術スタック
+
+- **フロントエンド**: Next.js 15.3.3, React 19, TypeScript
+- **バックエンド**: Supabase (PostgreSQL + Row Level Security)
+- **スタイリング**: Tailwind CSS, Radix UI
+- **暗号化**: CryptoJS (AES, PBKDF2)
+- **認証**: Supabase Auth
+- **UI コンポーネント**: 自作コンポーネント + Radix UI
+
+## 🚀 セットアップ
+
+### 前提条件
+- Node.js 18以上
+- npm または yarn
+- Supabaseアカウント
+
+### インストール
+
+1. リポジトリをクローン
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone <repository-url>
+cd password-manager
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+2. 依存関係をインストール
+```bash
+npm install
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+3. 環境変数の設定
+`.env.local`ファイルを作成し、以下を追加：
+```env
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+4. Supabaseの設定
+- `SUPABASE_SETUP.md`の手順に従ってSupabaseを設定
+- `supabase/schema.sql`を実行してデータベースを初期化
 
-## Learn More
+5. 開発サーバーを起動
+```bash
+npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+アプリケーションが `http://localhost:3010` で起動します。
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 📖 使い方
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### 初回セットアップ
+1. メールアドレスとPINコード（4桁以上）でアカウントを作成
+2. ログイン後、ダッシュボードが表示されます
 
-## Deploy on Vercel
+### パスワード管理
+1. **新規追加**: 「新規追加」ボタンでパスワードエントリを作成
+2. **編集**: エントリの編集ボタンで情報を更新
+3. **削除**: 削除ボタンで不要なエントリを削除
+4. **コピー**: コピーボタンでパスワードをクリップボードに保存
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### 検索・整理
+- **検索**: 検索バーでサービス名、ユーザー名、タグを検索
+- **フィルター**: カテゴリドロップダウンで絞り込み
+- **タグ**: 色分けされたタグで視覚的に分類
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## 🏗️ アーキテクチャ
+
+### セキュリティ設計
+```
+ユーザー入力 → PIN認証 → キー導出(PBKDF2) → AES暗号化 → Supabase保存
+```
+
+### コンポーネント構成
+```
+app/
+├── auth/          # 認証ページ
+├── dashboard/     # メインダッシュボード
+└── logout/        # ログアウトページ
+
+components/
+├── password-manager/  # パスワード管理専用コンポーネント
+│   ├── header.tsx
+│   ├── search-bar.tsx
+│   ├── password-entry-card.tsx
+│   ├── add-password-form.tsx
+│   ├── edit-password-form.tsx
+│   ├── password-strength-indicator.tsx
+│   └── loading-spinner.tsx
+└── ui/               # 共通UIコンポーネント
+```
+
+## 🔒 セキュリティ機能
+
+- **ゼロ知識アーキテクチャ**: サーバーは暗号化されたデータのみ保存
+- **セッション管理**: 暗号化キーはセッションストレージのみ
+- **レート制限**: ログイン試行の間隔制限（30秒）
+- **自動ログアウト**: セッション期限切れで自動ログアウト
+
+## 🎨 UI/UX 特徴
+
+- **グラデーションデザイン**: モダンで美しいビジュアル
+- **アニメーション**: 滑らかなトランジションとマイクロインタラクション
+- **レスポンシブ**: モバイルファーストのデザイン
+- **アクセシビリティ**: キーボードナビゲーション対応
+
+## 📝 開発
+
+### ビルド
+```bash
+npm run build
+```
+
+### リント
+```bash
+npm run lint
+```
+
+### 型チェック
+```bash
+npm run type-check
+```
+
+## 🚀 デプロイ
+
+1. Vercel、Netlify、または任意のプラットフォームにデプロイ
+2. 環境変数を設定
+3. Supabaseの本番環境を構成
+
+## 📄 ライセンス
+
+このプロジェクトはプライベートです。
+
+## 🤝 貢献
+
+現在、このプロジェクトは個人開発です。
+
+---
+
+**SecureVault** - 安全で美しく、あなたの大切な情報を守ります 🔐

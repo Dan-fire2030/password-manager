@@ -5,9 +5,11 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { Key, Plus } from 'lucide-react'
+import { Key, Plus, Wifi, WifiOff } from 'lucide-react'
 import { encryptData, decryptData, generatePassword } from '@/lib/crypto'
 import { toast } from 'sonner'
+import { usePWA } from '@/components/pwa/service-worker-provider'
+import { cacheOfflineData, getOfflineData } from '@/lib/sw-utils'
 import Header from '@/components/password-manager/header'
 import SearchBar from '@/components/password-manager/search-bar'
 import PasswordEntryCard from '@/components/password-manager/password-entry-card'
@@ -49,8 +51,10 @@ export default function DashboardPage() {
   const [showEditForm, setShowEditForm] = useState(false)
   const [showPasswords, setShowPasswords] = useState<{ [key: string]: boolean }>({})
   const [loading, setLoading] = useState(true)
+  const [isOfflineData, setIsOfflineData] = useState(false)
   const router = useRouter()
   const supabase = createClient()
+  const { isOnline } = usePWA()
 
   // 新規エントリ用のフォームデータ
   const [formData, setFormData] = useState({
@@ -105,6 +109,15 @@ export default function DashboardPage() {
     loadEntries()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // オンライン状態の変化を監視
+  useEffect(() => {
+    if (isOnline && isOfflineData) {
+      // オフラインからオンラインに復帰した場合、データを再読み込み
+      loadEntries()
+      toast.success('オンラインに復帰しました。データを同期しています')
+    }
+  }, [isOnline, isOfflineData]) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     // 検索フィルタリング
     let filtered = entries.filter(entry =>
@@ -130,39 +143,73 @@ export default function DashboardPage() {
         return
       }
 
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        router.push('/auth')
-        return
-      }
-
-      const { data, error } = await supabase
-        .from('password_entries')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('updated_at', { ascending: false })
-
-      if (error) throw error
-
-      // 復号化
-      const decryptedEntries = data.map(entry => {
-        try {
-          const decryptedData = JSON.parse(decryptData(entry.encrypted_data, encryptionKey))
-          return {
-            id: entry.id,
-            ...decryptedData,
-            createdAt: entry.created_at,
-            updatedAt: entry.updated_at,
-          }
-        } catch (e) {
-          console.error('復号化エラー:', e)
-          return null
+      // オンライン時の処理
+      if (isOnline) {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+          router.push('/auth')
+          return
         }
-      }).filter(Boolean) as PasswordEntry[]
 
-      setEntries(decryptedEntries)
-    } catch {
-      toast.error('データの読み込みに失敗しました')
+        const { data, error } = await supabase
+          .from('password_entries')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('updated_at', { ascending: false })
+
+        if (error) throw error
+
+        // 復号化
+        const decryptedEntries = data.map(entry => {
+          try {
+            const decryptedData = JSON.parse(decryptData(entry.encrypted_data, encryptionKey))
+            return {
+              id: entry.id,
+              ...decryptedData,
+              createdAt: entry.created_at,
+              updatedAt: entry.updated_at,
+            }
+          } catch (e) {
+            console.error('復号化エラー:', e)
+            return null
+          }
+        }).filter(Boolean) as PasswordEntry[]
+
+        setEntries(decryptedEntries)
+        setIsOfflineData(false)
+        
+        // オンライン時にデータをキャッシュに保存
+        await cacheOfflineData('password-entries', decryptedEntries)
+        
+      } else {
+        // オフライン時: キャッシュからデータを取得
+        const cachedEntries = await getOfflineData('password-entries')
+        if (cachedEntries && Array.isArray(cachedEntries)) {
+          setEntries(cachedEntries)
+          setIsOfflineData(true)
+          toast.info('オフラインモード: キャッシュされたデータを表示しています')
+        } else {
+          setEntries([])
+          setIsOfflineData(true)
+          toast.warning('オフラインデータが見つかりません')
+        }
+      }
+    } catch (error) {
+      console.error('データの読み込みエラー:', error)
+      
+      // オンラインでエラーが発生した場合はオフラインデータを試行
+      if (isOnline) {
+        const cachedEntries = await getOfflineData('password-entries')
+        if (cachedEntries && Array.isArray(cachedEntries)) {
+          setEntries(cachedEntries)
+          setIsOfflineData(true)
+          toast.warning('サーバーに接続できません。キャッシュデータを表示しています')
+        } else {
+          toast.error('データの読み込みに失敗しました')
+        }
+      } else {
+        toast.error('オフラインデータの読み込みに失敗しました')
+      }
     } finally {
       setLoading(false)
     }
@@ -170,6 +217,12 @@ export default function DashboardPage() {
 
   const handleAddEntry = async (e: React.FormEvent) => {
     e.preventDefault()
+    
+    // オフライン時のチェック
+    if (!isOnline) {
+      toast.error('オフライン時は新規追加できません。オンラインに復帰してからお試しください')
+      return
+    }
     
     try {
       const encryptionKey = sessionStorage.getItem('encryptionKey')
@@ -221,6 +274,12 @@ export default function DashboardPage() {
   }
 
   const handleDeleteEntry = async (id: string) => {
+    // オフライン時のチェック
+    if (!isOnline) {
+      toast.error('オフライン時は削除できません。オンラインに復帰してからお試しください')
+      return
+    }
+    
     if (!confirm('このエントリを削除してもよろしいですか？')) return
 
     try {
@@ -305,6 +364,12 @@ export default function DashboardPage() {
 
   const handleUpdateEntry = async (e: React.FormEvent) => {
     e.preventDefault()
+    
+    // オフライン時のチェック
+    if (!isOnline) {
+      toast.error('オフライン時は編集できません。オンラインに復帰してからお試しください')
+      return
+    }
     
     try {
       const encryptionKey = sessionStorage.getItem('encryptionKey')
@@ -430,7 +495,13 @@ export default function DashboardPage() {
         <SearchBar 
           searchQuery={searchQuery}
           onSearchChange={setSearchQuery}
-          onAddNew={() => setShowAddForm(true)}
+          onAddNew={() => {
+            if (!isOnline) {
+              toast.error('オフライン時は新規追加できません')
+              return
+            }
+            setShowAddForm(true)
+          }}
           categoryFilter={categoryFilter}
           onCategoryFilterChange={setCategoryFilter}
           availableCategories={availableCategories}
@@ -492,8 +563,20 @@ export default function DashboardPage() {
               onCopyUsername={() => copyToClipboard(entry.username, 'ユーザー識別情報')}
               onCopyPassword={() => copyToClipboard(entry.password, 'パスワード')}
               onCopyBoth={() => copyBothToClipboard(entry.username, entry.password)}
-              onEdit={() => handleEditEntry(entry)}
-              onDelete={() => handleDeleteEntry(entry.id)}
+              onEdit={() => {
+                if (!isOnline) {
+                  toast.error('オフライン時は編集できません')
+                  return
+                }
+                handleEditEntry(entry)
+              }}
+              onDelete={() => {
+                if (!isOnline) {
+                  toast.error('オフライン時は削除できません')
+                  return
+                }
+                handleDeleteEntry(entry.id)
+              }}
               getTagColor={getTagColor}
             />
           ))}
@@ -542,10 +625,24 @@ export default function DashboardPage() {
       </main>
       
       <div className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-40">
-        <div className="bg-white/90 backdrop-blur-xl rounded-xl sm:rounded-2xl shadow-lg border border-white/20 p-3 sm:p-4 transition-all duration-300 hover:shadow-xl">
-          <p className="text-xs text-slate-600 font-semibold">
-            {entries.length}件のパスワードを安全に管理中
-          </p>
+        <div className={`bg-white/90 backdrop-blur-xl rounded-xl sm:rounded-2xl shadow-lg border border-white/20 p-3 sm:p-4 transition-all duration-300 hover:shadow-xl ${!isOnline ? 'border-amber-200 bg-amber-50/90' : ''}`}>
+          <div className="flex items-center gap-2">
+            {isOnline ? (
+              <Wifi className="w-3 h-3 text-green-600" />
+            ) : (
+              <WifiOff className="w-3 h-3 text-amber-600" />
+            )}
+            <div>
+              <p className="text-xs text-slate-600 font-semibold">
+                {entries.length}件のパスワードを安全に管理中
+              </p>
+              {isOfflineData && (
+                <p className="text-xs text-amber-600 mt-1">
+                  オフラインデータを表示中
+                </p>
+              )}
+            </div>
+          </div>
         </div>
       </div>
     </div>

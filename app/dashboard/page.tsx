@@ -57,6 +57,7 @@ export default function DashboardPage() {
   const router = useRouter()
   const supabase = createClient()
   const { isOnline } = usePWA()
+  const [isServiceWorkerReady, setIsServiceWorkerReady] = useState(false)
 
   // 新規エントリ用のフォームデータ
   const [formData, setFormData] = useState({
@@ -108,6 +109,17 @@ export default function DashboardPage() {
   })
 
   useEffect(() => {
+    // Service Worker の準備を待つ
+    const initTimer = setTimeout(() => {
+      setIsServiceWorkerReady(true)
+    }, 500) // 0.5秒待機
+
+    return () => clearTimeout(initTimer)
+  }, [])
+
+  useEffect(() => {
+    if (!isServiceWorkerReady) return
+
     // ミドルウェアが認証をチェック済みなので、ここではデータの読み込みのみ
     // セッションの有効性をチェック（ブラウザ再起動後の復元確認）
     if (!isSessionValid()) {
@@ -137,7 +149,7 @@ export default function DashboardPage() {
       if (timer) clearTimeout(timer)
       clearTimeout(loadTimer)
     }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isServiceWorkerReady]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // オンライン状態の変化を監視
   useEffect(() => {
@@ -176,13 +188,9 @@ export default function DashboardPage() {
           encryptionKey = sessionStorage.getItem('encryptionKey')
           toast.success('セッションを復元しました')
         } else {
-          const { data: { user } } = await supabase.auth.getUser()
-          if (!user) {
-            router.push('/auth')
-            return
-          }
-          
+          // バックアップからの復元に失敗した場合、認証ページに戻る
           toast.warning('セッションの復元に失敗しました。再度ログインしてください。')
+          setLoading(false)
           router.push('/auth')
           return
         }
@@ -192,6 +200,7 @@ export default function DashboardPage() {
       if (isOnline) {
         const { data: { user } } = await supabase.auth.getUser()
         if (!user) {
+          setLoading(false)
           router.push('/auth')
           return
         }
@@ -202,7 +211,23 @@ export default function DashboardPage() {
           .eq('user_id', user.id)
           .order('updated_at', { ascending: false })
 
-        if (error) throw error
+        if (error) {
+          console.error('Supabase query error:', error)
+          throw error
+        }
+
+        // データが空の場合（新規ユーザー）の処理
+        if (!data || data.length === 0) {
+          setEntries([])
+          setIsOfflineData(false)
+          try {
+            await cacheOfflineData('password-entries', [])
+            await cacheOfflineData('encryption-key', encryptionKey)
+          } catch (cacheError) {
+            console.warn('キャッシュの保存に失敗しました:', cacheError)
+          }
+          return
+        }
 
         // 復号化
         const decryptedEntries = data.map(entry => {
@@ -221,6 +246,7 @@ export default function DashboardPage() {
             console.error('復号化エラー:', e)
             // 復号化に失敗した場合は再ログインを促す
             toast.error('データの復号化に失敗しました。再度ログインしてください。')
+            setLoading(false)
             router.push('/auth')
             return null
           }
@@ -230,27 +256,37 @@ export default function DashboardPage() {
         setIsOfflineData(false)
         
         // オンライン時にデータをキャッシュに保存
-        await cacheOfflineData('password-entries', decryptedEntries)
-        
-        // 暗号化キーもキャッシュ（セキュリティ上注意が必要）
-        await cacheOfflineData('encryption-key', encryptionKey)
+        try {
+          await cacheOfflineData('password-entries', decryptedEntries)
+          await cacheOfflineData('encryption-key', encryptionKey)
+        } catch (cacheError) {
+          console.warn('キャッシュの保存に失敗しました:', cacheError)
+          // キャッシュエラーは致命的ではないため続行
+        }
         
       } else {
         // オフライン時: キャッシュからデータと暗号化キーを取得
-        const cachedKey = await getOfflineData('encryption-key') as string
-        if (cachedKey) {
-          sessionStorage.setItem('encryptionKey', cachedKey)
-        }
-        
-        const cachedEntries = await getOfflineData('password-entries')
-        if (cachedEntries && Array.isArray(cachedEntries)) {
-          setEntries(cachedEntries)
-          setIsOfflineData(true)
-          toast.info('オフラインモード: キャッシュされたデータを表示しています')
-        } else {
+        try {
+          const cachedKey = await getOfflineData('encryption-key') as string
+          if (cachedKey) {
+            sessionStorage.setItem('encryptionKey', cachedKey)
+          }
+          
+          const cachedEntries = await getOfflineData('password-entries')
+          if (cachedEntries && Array.isArray(cachedEntries)) {
+            setEntries(cachedEntries)
+            setIsOfflineData(true)
+            toast.info('オフラインモード: キャッシュされたデータを表示しています')
+          } else {
+            setEntries([])
+            setIsOfflineData(true)
+            toast.warning('オフラインデータが見つかりません')
+          }
+        } catch (offlineError) {
+          console.warn('オフラインデータの読み込みに失敗:', offlineError)
           setEntries([])
           setIsOfflineData(true)
-          toast.warning('オフラインデータが見つかりません')
+          toast.warning('オフラインデータの読み込みに失敗しました')
         }
       }
     } catch (error) {
@@ -269,14 +305,20 @@ export default function DashboardPage() {
             toast.warning('サーバーに接続できません。キャッシュデータを表示しています')
           } else {
             toast.error('データの読み込みに失敗しました。再度ログインしてください。')
+            setLoading(false)
             router.push('/auth')
+            return
           }
         } catch {
           toast.error('データの読み込みに失敗しました。再度ログインしてください。')
+          setLoading(false)
           router.push('/auth')
+          return
         }
       } else {
         toast.error('オフラインデータの読み込みに失敗しました')
+        setEntries([])
+        setIsOfflineData(true)
       }
     } finally {
       setLoading(false)

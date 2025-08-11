@@ -6,10 +6,11 @@ import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Key, Plus, Wifi, WifiOff } from 'lucide-react'
-import { encryptData, generatePassword } from '@/lib/crypto'
+import { encryptData, decryptData, generatePassword } from '@/lib/crypto'
 import { toast } from 'sonner'
 import { usePWA } from '@/components/pwa/service-worker-provider'
-import { clearSession } from '@/lib/auth-utils'
+import { isSessionValid, clearSession, setupSessionTimer } from '@/lib/auth-utils'
+import { attemptSessionRecovery } from '@/lib/session-recovery'
 import Header from '@/components/password-manager/header'
 import SearchBar from '@/components/password-manager/search-bar'
 import PasswordEntryCard from '@/components/password-manager/password-entry-card'
@@ -51,6 +52,7 @@ export default function DashboardPage() {
   const [showEditForm, setShowEditForm] = useState(false)
   const [showPasswords, setShowPasswords] = useState<{ [key: string]: boolean }>({})
   const [loading, setLoading] = useState(true)
+  const [isOfflineData, setIsOfflineData] = useState(false)
   const router = useRouter()
   const supabase = createClient()
   const { isOnline } = usePWA()
@@ -119,12 +121,45 @@ export default function DashboardPage() {
       return
     }
 
-    console.log('[Dashboard] データ読み込み開始')
+    console.log('[Dashboard] 初期化処理開始')
     
-    // データ読み込みを直接実行（タイマー無し）
+    // セッションの有効性をチェック（ブラウザ再起動後の復元確認）
+    if (!isSessionValid()) {
+      console.log('[Dashboard] セッション無効 - 復元を試行')
+      const recovered = attemptSessionRecovery()
+      if (!recovered) {
+        console.log('[Dashboard] セッション復元失敗 - 認証画面へ')
+        toast.error('セッションが期限切れです。再度ログインしてください。')
+        router.push('/auth')
+        return
+      }
+      console.log('[Dashboard] セッション復元成功')
+    }
+    
+    // セッションタイマーを設定（自動ログアウト）
+    const timer = setupSessionTimer(() => {
+      toast.error('セッションが期限切れになりました。')
+      clearSession()
+      router.push('/auth')
+    })
+    
+    console.log('[Dashboard] データ読み込み開始')
     loadEntries()
     
-  }, [isServiceWorkerReady])
+    return () => {
+      if (timer) clearTimeout(timer)
+    }
+  }, [isServiceWorkerReady]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // オンライン状態の変化を監視
+  useEffect(() => {
+    if (isOnline && isOfflineData) {
+      // オフラインからオンラインに復帰した場合、データを再読み込み
+      console.log('[Dashboard] オンライン復帰 - データ再読み込み')
+      loadEntries()
+      toast.success('オンラインに復帰しました。データを同期しています')
+    }
+  }, [isOnline, isOfflineData]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     // 検索フィルタリング
@@ -147,13 +182,102 @@ export default function DashboardPage() {
     console.log('[Dashboard] loadEntries開始')
     
     try {
-      // まず単純にローディングを停止してみる（デバッグ用）
-      console.log('[Dashboard] 簡素化テスト - ローディング停止')
-      setEntries([])
-      setLoading(false)
-      return
+      // 暗号化キーの確認・復元
+      let encryptionKey = sessionStorage.getItem('encryptionKey')
+      console.log('[Dashboard] 暗号化キーチェック:', !!encryptionKey)
+      
+      // SessionStorageにない場合、バックアップから復元を試行
+      if (!encryptionKey) {
+        console.log('[Dashboard] セッション復元を試行')
+        if (attemptSessionRecovery()) {
+          encryptionKey = sessionStorage.getItem('encryptionKey')
+          console.log('[Dashboard] セッション復元成功:', !!encryptionKey)
+          toast.success('セッションを復元しました')
+        } else {
+          console.log('[Dashboard] セッション復元失敗')
+          toast.warning('セッションの復元に失敗しました。再度ログインしてください。')
+          setLoading(false)
+          router.push('/auth')
+          return
+        }
+      }
+
+      // オンライン時の処理
+      if (isOnline) {
+        console.log('[Dashboard] オンライン処理開始')
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+          console.log('[Dashboard] ユーザー認証失敗')
+          setLoading(false)
+          router.push('/auth')
+          return
+        }
+
+        console.log('[Dashboard] データベースクエリ実行')
+        const { data, error } = await supabase
+          .from('password_entries')
+          .select('*')
+          .eq('user_id', user.id)
+          .order('updated_at', { ascending: false })
+
+        if (error) {
+          console.error('[Dashboard] データベースエラー:', error)
+          throw error
+        }
+
+        console.log('[Dashboard] 取得データ数:', data?.length || 0)
+
+        // データが空の場合（新規ユーザー）の処理
+        if (!data || data.length === 0) {
+          console.log('[Dashboard] 新規ユーザー処理')
+          setEntries([])
+          setIsOfflineData(false)
+          return
+        }
+
+        // 復号化処理
+        console.log('[Dashboard] 復号化処理開始')
+        const decryptedEntries: PasswordEntry[] = []
+        
+        for (const entry of data) {
+          try {
+            if (!encryptionKey) {
+              throw new Error('暗号化キーが見つかりません')
+            }
+            const decryptedData = JSON.parse(decryptData(entry.encrypted_data, encryptionKey))
+            decryptedEntries.push({
+              id: entry.id,
+              ...decryptedData,
+              createdAt: entry.created_at,
+              updatedAt: entry.updated_at,
+            })
+          } catch (e) {
+            console.error('[Dashboard] 復号化エラー:', e)
+            toast.error('データの復号化に失敗しました。再度ログインしてください。')
+            setLoading(false)
+            router.push('/auth')
+            return
+          }
+        }
+
+        console.log('[Dashboard] 復号化完了 - エントリ数:', decryptedEntries.length)
+        setEntries(decryptedEntries)
+        setIsOfflineData(false)
+        
+      } else {
+        console.log('[Dashboard] オフライン処理')
+        // オフライン時は空配列を設定（簡素化）
+        setEntries([])
+        setIsOfflineData(true)
+        toast.info('オフラインモードです')
+      }
+      
     } catch (error) {
       console.error('[Dashboard] loadEntries エラー:', error)
+      toast.error('データの読み込みに失敗しました')
+      setEntries([])
+    } finally {
+      console.log('[Dashboard] loadEntries完了 - ローディング停止')
       setLoading(false)
     }
   }
@@ -588,6 +712,11 @@ export default function DashboardPage() {
               <p className="text-xs text-slate-600 font-semibold">
                 {entries.length}件のパスワードを安全に管理中
               </p>
+              {isOfflineData && (
+                <p className="text-xs text-amber-600 mt-1">
+                  オフラインデータを表示中
+                </p>
+              )}
             </div>
           </div>
         </div>

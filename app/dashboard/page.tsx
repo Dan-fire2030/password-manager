@@ -109,8 +109,21 @@ export default function DashboardPage() {
 
   useEffect(() => {
     console.log('[Dashboard] 初期化useEffect実行')
-    // Service Worker の準備を待たずに即座に準備完了とする
-    setIsServiceWorkerReady(true)
+    console.log('[Dashboard] PWA環境チェック:', {
+      standalone: window.matchMedia('(display-mode: standalone)').matches,
+      userAgent: navigator.userAgent.includes('Mobile')
+    })
+    
+    // PWA環境では Service Worker の準備により時間がかかる可能性があるため調整
+    const isPWA = window.matchMedia('(display-mode: standalone)').matches
+    const delay = isPWA ? 1000 : 100 // PWAの場合は1秒待機
+    
+    const initTimer = setTimeout(() => {
+      console.log('[Dashboard] Service Worker準備完了 (PWA:', isPWA, ')')
+      setIsServiceWorkerReady(true)
+    }, delay)
+
+    return () => clearTimeout(initTimer)
   }, [])
 
   useEffect(() => {
@@ -123,17 +136,44 @@ export default function DashboardPage() {
 
     console.log('[Dashboard] 初期化処理開始')
     
-    // セッションの有効性をチェック（ブラウザ再起動後の復元確認）
-    if (!isSessionValid()) {
-      console.log('[Dashboard] セッション無効 - 復元を試行')
-      const recovered = attemptSessionRecovery()
-      if (!recovered) {
-        console.log('[Dashboard] セッション復元失敗 - 認証画面へ')
-        toast.error('セッションが期限切れです。再度ログインしてください。')
-        router.push('/auth')
-        return
+    // PWA環境でのセッション管理を改善
+    const isPWA = window.matchMedia('(display-mode: standalone)').matches
+    console.log('[Dashboard] PWA環境:', isPWA)
+    
+    try {
+      // セッションの有効性をチェック（ブラウザ再起動後の復元確認）
+      if (!isSessionValid()) {
+        console.log('[Dashboard] セッション無効 - 復元を試行')
+        
+        // PWA環境ではセッション復元をより慎重に行う
+        if (isPWA) {
+          // PWAでは直接 localStorage を確認
+          const hasBackupKey = localStorage.getItem('backup-encryption-key')
+          const hasBackupSalt = localStorage.getItem('backup-user-salt')
+          console.log('[Dashboard] PWA バックアップチェック:', { hasBackupKey: !!hasBackupKey, hasBackupSalt: !!hasBackupSalt })
+          
+          if (!hasBackupKey || !hasBackupSalt) {
+            console.log('[Dashboard] PWA環境でバックアップなし - 認証画面へ')
+            toast.warning('PWA環境でセッション情報が見つかりません。再度ログインしてください。')
+            router.push('/auth')
+            return
+          }
+        }
+        
+        const recovered = attemptSessionRecovery()
+        if (!recovered) {
+          console.log('[Dashboard] セッション復元失敗 - 認証画面へ')
+          toast.error('セッションが期限切れです。再度ログインしてください。')
+          router.push('/auth')
+          return
+        }
+        console.log('[Dashboard] セッション復元成功')
       }
-      console.log('[Dashboard] セッション復元成功')
+    } catch (sessionError) {
+      console.error('[Dashboard] セッションチェックエラー:', sessionError)
+      toast.error('セッション確認中にエラーが発生しました。再度ログインしてください。')
+      router.push('/auth')
+      return
     }
     
     // セッションタイマーを設定（自動ログアウト）
@@ -180,8 +220,16 @@ export default function DashboardPage() {
 
   const loadEntries = async () => {
     console.log('[Dashboard] loadEntries開始')
+    const isPWA = window.matchMedia('(display-mode: standalone)').matches
+    console.log('[Dashboard] PWA環境でloadEntries:', isPWA)
     
     try {
+      // PWA環境では追加の遅延を設ける
+      if (isPWA) {
+        console.log('[Dashboard] PWA環境 - 追加待機')
+        await new Promise(resolve => setTimeout(resolve, 500))
+      }
+      
       // 暗号化キーの確認・復元
       let encryptionKey = sessionStorage.getItem('encryptionKey')
       console.log('[Dashboard] 暗号化キーチェック:', !!encryptionKey)
@@ -189,23 +237,73 @@ export default function DashboardPage() {
       // SessionStorageにない場合、バックアップから復元を試行
       if (!encryptionKey) {
         console.log('[Dashboard] セッション復元を試行')
-        if (attemptSessionRecovery()) {
-          encryptionKey = sessionStorage.getItem('encryptionKey')
-          console.log('[Dashboard] セッション復元成功:', !!encryptionKey)
-          toast.success('セッションを復元しました')
+        
+        // PWA環境では直接バックアップから復元
+        if (isPWA) {
+          const backupKey = localStorage.getItem('backup-encryption-key')
+          if (backupKey) {
+            sessionStorage.setItem('encryptionKey', backupKey)
+            encryptionKey = backupKey
+            console.log('[Dashboard] PWA環境で直接復元成功')
+            toast.success('PWA環境でセッションを復元しました')
+          } else {
+            console.log('[Dashboard] PWA環境でバックアップなし')
+            toast.warning('PWA環境でセッション情報が見つかりません。再度ログインしてください。')
+            setLoading(false)
+            router.push('/auth')
+            return
+          }
         } else {
-          console.log('[Dashboard] セッション復元失敗')
-          toast.warning('セッションの復元に失敗しました。再度ログインしてください。')
+          if (attemptSessionRecovery()) {
+            encryptionKey = sessionStorage.getItem('encryptionKey')
+            console.log('[Dashboard] セッション復元成功:', !!encryptionKey)
+            toast.success('セッションを復元しました')
+          } else {
+            console.log('[Dashboard] セッション復元失敗')
+            toast.warning('セッションの復元に失敗しました。再度ログインしてください。')
+            setLoading(false)
+            router.push('/auth')
+            return
+          }
+        }
+      }
+
+      // オンライン状態の確認（PWA環境では navigator.onLine も確認）
+      const actuallyOnline = isPWA ? (navigator.onLine && isOnline) : isOnline
+      console.log('[Dashboard] オンライン状態:', { isOnline, navigatorOnline: navigator.onLine, actuallyOnline })
+      
+      // オンライン時の処理
+      if (actuallyOnline) {
+        console.log('[Dashboard] オンライン処理開始')
+        
+        // PWA環境でのSupabase認証を慎重に行う
+        let user = null
+        try {
+          const { data: { user: authUser }, error: authError } = await supabase.auth.getUser()
+          if (authError) {
+            console.error('[Dashboard] 認証エラー:', authError)
+            throw authError
+          }
+          user = authUser
+        } catch (authErr) {
+          console.error('[Dashboard] Supabase認証失敗:', authErr)
+          if (isPWA) {
+            // PWA環境では認証エラーの場合でも暗号化キーがあれば継続を試みる
+            console.log('[Dashboard] PWA環境で認証失敗 - 暗号化キーチェック')
+            if (encryptionKey) {
+              console.log('[Dashboard] PWA環境で暗号化キーあり - オフライン処理へ')
+              // オフライン処理にフォールバック
+              setEntries([])
+              setIsOfflineData(true)
+              toast.warning('PWA環境でサーバー接続に問題があります。オフライン機能で動作します')
+              return
+            }
+          }
           setLoading(false)
           router.push('/auth')
           return
         }
-      }
-
-      // オンライン時の処理
-      if (isOnline) {
-        console.log('[Dashboard] オンライン処理開始')
-        const { data: { user } } = await supabase.auth.getUser()
+        
         if (!user) {
           console.log('[Dashboard] ユーザー認証失敗')
           setLoading(false)

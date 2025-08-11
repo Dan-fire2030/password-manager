@@ -10,6 +10,7 @@ import { encryptData, decryptData, generatePassword } from '@/lib/crypto'
 import { toast } from 'sonner'
 import { usePWA } from '@/components/pwa/service-worker-provider'
 import { cacheOfflineData, getOfflineData } from '@/lib/sw-utils'
+import { isSessionValid, clearSession, setupSessionTimer } from '@/lib/auth-utils'
 import Header from '@/components/password-manager/header'
 import SearchBar from '@/components/password-manager/search-bar'
 import PasswordEntryCard from '@/components/password-manager/password-entry-card'
@@ -106,7 +107,26 @@ export default function DashboardPage() {
   })
 
   useEffect(() => {
+    // セッションの有効性をチェック
+    if (!isSessionValid()) {
+      toast.error('セッションが期限切れです。再度ログインしてください。')
+      router.push('/auth')
+      return
+    }
+    
+    // セッションタイマーを設定（自動ログアウト）
+    const timer = setupSessionTimer(() => {
+      toast.error('セッションが期限切れになりました。')
+      clearSession()
+      router.push('/auth')
+    })
+    
     loadEntries()
+    
+    // クリーンアップ
+    return () => {
+      if (timer) clearTimeout(timer)
+    }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // オンライン状態の変化を監視
@@ -312,11 +332,13 @@ export default function DashboardPage() {
   const handleLogout = async () => {
     try {
       await supabase.auth.signOut()
+      clearSession() // セッション情報をクリア
       sessionStorage.removeItem('encryptionKey')
       router.push('/auth')
     } catch (error) {
       console.error('Logout error:', error)
       // エラーが発生してもセッションをクリアして認証ページに移動
+      clearSession()
       sessionStorage.removeItem('encryptionKey')
       router.push('/auth')
     }

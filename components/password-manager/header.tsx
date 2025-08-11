@@ -2,10 +2,11 @@
 
 import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
-import { LogOut, Key, Fingerprint } from 'lucide-react'
+import { LogOut, Key, Fingerprint, Clock } from 'lucide-react'
 import { BiometricSetup } from '@/components/biometric/biometric-setup'
 import { isBiometricAvailable, isBiometricRegistered } from '@/lib/webauthn'
 import { createClient } from '@/lib/supabase/client'
+import { getSessionRemainingTimeString } from '@/lib/auth-utils'
 
 interface HeaderProps {
   onLogout: () => void
@@ -17,11 +18,22 @@ export default function Header({ onLogout }: HeaderProps) {
   const [biometricRegistered, setBiometricRegistered] = useState(false)
   const [userId, setUserId] = useState('')
   const [userEmail, setUserEmail] = useState('')
+  const [sessionTime, setSessionTime] = useState('')
   const supabase = createClient()
 
   useEffect(() => {
     checkBiometricStatus()
     getUserInfo()
+    
+    // セッション残り時間を定期的に更新
+    const updateSessionTime = () => {
+      setSessionTime(getSessionRemainingTimeString())
+    }
+    
+    updateSessionTime()
+    const interval = setInterval(updateSessionTime, 1000) // 1秒ごとに更新
+    
+    return () => clearInterval(interval)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const checkBiometricStatus = async () => {
@@ -65,6 +77,14 @@ export default function Header({ onLogout }: HeaderProps) {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {/* セッション残り時間表示 */}
+            {sessionTime && sessionTime !== 'セッション終了' && (
+              <div className="hidden sm:flex items-center gap-1 text-xs text-slate-500 bg-slate-50 px-2 py-1 rounded-lg">
+                <Clock className="h-3 w-3" />
+                <span>{sessionTime}</span>
+              </div>
+            )}
+            
             {/* 生体認証設定ボタン */}
             {biometricAvailable && (
               <Button

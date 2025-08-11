@@ -1,6 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+// セッションチェック用のCookie名
+const SESSION_COOKIE = 'auth-session-timestamp';
+
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
@@ -41,6 +44,42 @@ export async function updateSession(request: NextRequest) {
     ]) as Awaited<ReturnType<typeof supabase.auth.getSession>>;
 
     const user = sessionResult.data?.session?.user;
+    
+    // セッションタイムスタンプをチェック（1時間の有効期限）
+    if (user) {
+      const sessionTimestamp = request.cookies.get(SESSION_COOKIE);
+      if (sessionTimestamp) {
+        const timestamp = parseInt(sessionTimestamp.value);
+        const currentTime = Date.now();
+        const SESSION_DURATION = 60 * 60 * 1000; // 1時間
+        
+        // セッションが期限切れの場合
+        if (currentTime - timestamp > SESSION_DURATION) {
+          await supabase.auth.signOut();
+          const url = request.nextUrl.clone();
+          url.pathname = "/auth";
+          supabaseResponse = NextResponse.redirect(url);
+          supabaseResponse.cookies.delete(SESSION_COOKIE);
+          return supabaseResponse;
+        }
+        
+        // セッションが有効な場合、タイムスタンプを更新
+        supabaseResponse.cookies.set(SESSION_COOKIE, currentTime.toString(), {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'strict',
+          maxAge: SESSION_DURATION / 1000, // 秒単位
+        });
+      } else {
+        // 初回ログイン時にタイムスタンプを設定
+        supabaseResponse.cookies.set(SESSION_COOKIE, Date.now().toString(), {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'strict',
+          maxAge: 60 * 60, // 1時間（秒単位）
+        });
+      }
+    }
 
     if (
       !user &&

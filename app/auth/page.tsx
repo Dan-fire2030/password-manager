@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { generateSalt, deriveKeyFromPin } from '@/lib/crypto'
 import { toast } from 'sonner'
 import { Fingerprint } from 'lucide-react'
+import { saveSession, isSessionValid } from '@/lib/auth-utils'
 import { 
   isBiometricAvailable, 
   isBiometricRegistered, 
@@ -31,6 +32,10 @@ export default function AuthPage() {
   const supabase = createClient()
 
   useEffect(() => {
+    // 既存のセッションをチェック
+    if (isSessionValid()) {
+      router.push('/dashboard')
+    }
     checkBiometricStatus()
   }, [email]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -137,6 +142,9 @@ export default function AuthPage() {
         // セッションストレージに暗号化キーを保存
         const encryptionKey = deriveKeyFromPin(pin, salt)
         sessionStorage.setItem('encryptionKey', encryptionKey)
+        
+        // セッション情報を保存（1時間有効）
+        saveSession(signInData.user.id, email)
 
         // 生体認証が利用可能な場合は登録を促す
         if (biometricAvailable) {
@@ -176,6 +184,9 @@ export default function AuthPage() {
         // 暗号化キーを生成してセッションストレージに保存
         const encryptionKey = deriveKeyFromPin(pin, profile.salt)
         sessionStorage.setItem('encryptionKey', encryptionKey)
+        
+        // セッション情報を保存（1時間有効）
+        saveSession(authData.user.id, email)
 
         toast.success('ログインしました')
         router.push('/dashboard')

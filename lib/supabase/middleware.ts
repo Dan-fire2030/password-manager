@@ -81,17 +81,26 @@ export async function updateSession(request: NextRequest) {
       }
     }
 
-    if (
-      !user &&
-      !request.nextUrl.pathname.startsWith("/auth") &&
-      !request.nextUrl.pathname.startsWith("/api")
-    ) {
+    // ログインが必要なルートをチェック
+    const protectedRoutes = ['/dashboard']
+    const publicRoutes = ['/auth']
+    const isProtectedRoute = protectedRoutes.some(route => 
+      request.nextUrl.pathname.startsWith(route)
+    )
+    const isPublicRoute = publicRoutes.some(route => 
+      request.nextUrl.pathname.startsWith(route)
+    )
+    const isRootRoute = request.nextUrl.pathname === '/'
+
+    // ユーザーが未ログインで保護されたルートにアクセスしようとした場合
+    if (!user && (isProtectedRoute || isRootRoute)) {
       const url = request.nextUrl.clone();
       url.pathname = "/auth";
       return NextResponse.redirect(url);
     }
 
-    if (user && request.nextUrl.pathname.startsWith("/auth")) {
+    // ユーザーがログイン済みで認証ページにアクセスした場合
+    if (user && isPublicRoute) {
       const url = request.nextUrl.clone();
       url.pathname = "/dashboard";
       return NextResponse.redirect(url);
@@ -101,11 +110,14 @@ export async function updateSession(request: NextRequest) {
   } catch (error) {
     console.error('Middleware session check failed:', error);
     
-    // If session check fails, redirect to auth for protected routes
-    if (
-      !request.nextUrl.pathname.startsWith("/auth") &&
-      !request.nextUrl.pathname.startsWith("/api")
-    ) {
+    // エラーが発生した場合、保護されたルートなら認証ページにリダイレクト
+    const protectedRoutes = ['/dashboard']
+    const isProtectedRoute = protectedRoutes.some(route => 
+      request.nextUrl.pathname.startsWith(route)
+    )
+    const isRootRoute = request.nextUrl.pathname === '/'
+    
+    if (isProtectedRoute || isRootRoute) {
       const url = request.nextUrl.clone();
       url.pathname = "/auth";
       return NextResponse.redirect(url);

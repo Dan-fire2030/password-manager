@@ -108,11 +108,16 @@ export default function DashboardPage() {
   })
 
   useEffect(() => {
-    // セッションの有効性をチェック
+    // ミドルウェアが認証をチェック済みなので、ここではデータの読み込みのみ
+    // セッションの有効性をチェック（ブラウザ再起動後の復元確認）
     if (!isSessionValid()) {
-      toast.error('セッションが期限切れです。再度ログインしてください。')
-      router.push('/auth')
-      return
+      // セッション復元を試行
+      const recovered = attemptSessionRecovery()
+      if (!recovered) {
+        toast.error('セッションが期限切れです。再度ログインしてください。')
+        router.push('/auth')
+        return
+      }
     }
     
     // セッションタイマーを設定（自動ログアウト）

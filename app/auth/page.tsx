@@ -147,8 +147,36 @@ export default function AuthPage() {
         saveSession(signInData.user.id, email)
         
         // 暗号化キーもローカルストレージにバックアップ（ブラウザ再開用）
-        localStorage.setItem('backup-encryption-key', encryptionKey)
-        localStorage.setItem('backup-user-salt', salt)
+        // PWA環境では特に確実に保存
+        const isPWA = window.matchMedia('(display-mode: standalone)').matches
+        console.log('[Auth] PWA環境でのバックアップ保存:', isPWA)
+        
+        try {
+          localStorage.setItem('backup-encryption-key', encryptionKey)
+          localStorage.setItem('backup-user-salt', salt)
+          
+          // PWA環境では追加確認
+          if (isPWA) {
+            const storedKey = localStorage.getItem('backup-encryption-key')
+            const storedSalt = localStorage.getItem('backup-user-salt')
+            console.log('[Auth] PWA環境 保存確認:', { 
+              keyStored: !!storedKey, 
+              saltStored: !!storedSalt,
+              keyMatch: storedKey === encryptionKey,
+              saltMatch: storedSalt === salt
+            })
+            
+            if (!storedKey || !storedSalt) {
+              console.error('[Auth] PWA環境でローカルストレージ保存失敗')
+              toast.warning('PWA環境での設定保存に問題があります。再起動時にログインが必要になる可能性があります。')
+            } else {
+              toast.success('PWA環境でのセッション情報を保存しました')
+            }
+          }
+        } catch (storageError) {
+          console.error('[Auth] ストレージ保存エラー:', storageError)
+          toast.warning('セッション情報の保存に問題があります。再起動時にログインが必要になる可能性があります。')
+        }
 
         // 生体認証が利用可能な場合は登録を促す
         if (biometricAvailable) {
@@ -193,8 +221,36 @@ export default function AuthPage() {
         saveSession(authData.user.id, email)
         
         // 暗号化キーもローカルストレージにバックアップ（ブラウザ再開用）
-        localStorage.setItem('backup-encryption-key', encryptionKey)
-        localStorage.setItem('backup-user-salt', profile.salt)
+        // PWA環境では特に確実に保存
+        const isPWASignIn = window.matchMedia('(display-mode: standalone)').matches
+        console.log('[Auth] サインインでPWA環境でのバックアップ保存:', isPWASignIn)
+        
+        try {
+          localStorage.setItem('backup-encryption-key', encryptionKey)
+          localStorage.setItem('backup-user-salt', profile.salt)
+          
+          // PWA環境では追加確認
+          if (isPWASignIn) {
+            const storedKey = localStorage.getItem('backup-encryption-key')
+            const storedSalt = localStorage.getItem('backup-user-salt')
+            console.log('[Auth] PWA環境 サインイン保存確認:', { 
+              keyStored: !!storedKey, 
+              saltStored: !!storedSalt,
+              keyMatch: storedKey === encryptionKey,
+              saltMatch: storedSalt === profile.salt
+            })
+            
+            if (!storedKey || !storedSalt) {
+              console.error('[Auth] PWA環境でサインイン時ローカルストレージ保存失敗')
+              toast.warning('PWA環境での設定保存に問題があります。再起動時にログインが必要になる可能性があります。')
+            } else {
+              toast.success('PWA環境でのセッション情報を保存しました')
+            }
+          }
+        } catch (storageError) {
+          console.error('[Auth] サインイン時ストレージ保存エラー:', storageError)
+          toast.warning('セッション情報の保存に問題があります。再起動時にログインが必要になる可能性があります。')
+        }
 
         toast.success('ログインしました')
         router.push('/dashboard')

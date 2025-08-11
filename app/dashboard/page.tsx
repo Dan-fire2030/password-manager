@@ -155,7 +155,10 @@ export default function DashboardPage() {
           if (!hasBackupKey || !hasBackupSalt) {
             console.log('[Dashboard] PWA環境でバックアップなし - 認証画面へ')
             toast.warning('PWA環境でセッション情報が見つかりません。再度ログインしてください。')
-            router.push('/auth')
+            setLoading(false) // 強制的にローディング停止
+            setTimeout(() => {
+              router.push('/auth')
+            }, 100) // 少し遅延させてローディング停止を確実にする
             return
           }
         }
@@ -164,7 +167,10 @@ export default function DashboardPage() {
         if (!recovered) {
           console.log('[Dashboard] セッション復元失敗 - 認証画面へ')
           toast.error('セッションが期限切れです。再度ログインしてください。')
-          router.push('/auth')
+          setLoading(false)
+          setTimeout(() => {
+            router.push('/auth')
+          }, 100)
           return
         }
         console.log('[Dashboard] セッション復元成功')
@@ -172,7 +178,10 @@ export default function DashboardPage() {
     } catch (sessionError) {
       console.error('[Dashboard] セッションチェックエラー:', sessionError)
       toast.error('セッション確認中にエラーが発生しました。再度ログインしてください。')
-      router.push('/auth')
+      setLoading(false)
+      setTimeout(() => {
+        router.push('/auth')
+      }, 100)
       return
     }
     
@@ -250,7 +259,9 @@ export default function DashboardPage() {
             console.log('[Dashboard] PWA環境でバックアップなし')
             toast.warning('PWA環境でセッション情報が見つかりません。再度ログインしてください。')
             setLoading(false)
-            router.push('/auth')
+            setTimeout(() => {
+              router.push('/auth')
+            }, 100)
             return
           }
         } else {
@@ -262,7 +273,9 @@ export default function DashboardPage() {
             console.log('[Dashboard] セッション復元失敗')
             toast.warning('セッションの復元に失敗しました。再度ログインしてください。')
             setLoading(false)
-            router.push('/auth')
+            setTimeout(() => {
+              router.push('/auth')
+            }, 100)
             return
           }
         }

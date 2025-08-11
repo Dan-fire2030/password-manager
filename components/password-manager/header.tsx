@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
-import { LogOut, Key, Fingerprint, Settings } from 'lucide-react'
+import { LogOut, Key, Fingerprint } from 'lucide-react'
 import { BiometricSetup } from '@/components/biometric/biometric-setup'
 import { isBiometricAvailable, isBiometricRegistered } from '@/lib/webauthn'
 import { createClient } from '@/lib/supabase/client'
@@ -22,7 +22,7 @@ export default function Header({ onLogout }: HeaderProps) {
   useEffect(() => {
     checkBiometricStatus()
     getUserInfo()
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const checkBiometricStatus = async () => {
     const available = await isBiometricAvailable()

@@ -4,7 +4,10 @@ import { toast } from 'sonner';
 
 // WebAuthnサポートのチェック
 export function isWebAuthnSupported(): boolean {
-  return !!(navigator.credentials && navigator.credentials.create && navigator.credentials.get);
+  return typeof navigator !== 'undefined' && 
+         'credentials' in navigator &&
+         typeof navigator.credentials.create === 'function' &&
+         typeof navigator.credentials.get === 'function';
 }
 
 // 生体認証の可用性チェック
@@ -115,17 +118,21 @@ export async function registerBiometric(userId: string, username: string): Promi
     localStorage.setItem('biometric-credentials', JSON.stringify(storedCredentials));
     
     // チャレンジも保存（検証用）
-    sessionStorage.setItem('biometric-challenge', bufferToBase64url(challenge));
+    sessionStorage.setItem('biometric-challenge', bufferToBase64url(challenge.buffer));
 
     toast.success('生体認証を登録しました');
     return true;
-  } catch (error: any) {
+  } catch (error) {
     console.error('生体認証の登録エラー:', error);
     
-    if (error.name === 'NotAllowedError') {
-      toast.error('生体認証がキャンセルされました');
-    } else if (error.name === 'NotSupportedError') {
-      toast.error('この端末は生体認証に対応していません');
+    if (error instanceof Error) {
+      if (error.name === 'NotAllowedError') {
+        toast.error('生体認証がキャンセルされました');
+      } else if (error.name === 'NotSupportedError') {
+        toast.error('この端末は生体認証に対応していません');
+      } else {
+        toast.error('生体認証の登録に失敗しました');
+      }
     } else {
       toast.error('生体認証の登録に失敗しました');
     }
@@ -143,7 +150,11 @@ export async function authenticateWithBiometric(userId?: string): Promise<boolea
 
   try {
     // 保存された認証情報を取得
-    const storedCredentials = JSON.parse(localStorage.getItem('biometric-credentials') || '[]');
+    const storedCredentials = JSON.parse(localStorage.getItem('biometric-credentials') || '[]') as Array<{
+      userId: string;
+      credentialId: string;
+      createdAt: string;
+    }>;
     
     if (storedCredentials.length === 0) {
       toast.error('生体認証が登録されていません');
@@ -152,7 +163,7 @@ export async function authenticateWithBiometric(userId?: string): Promise<boolea
 
     // userIdが指定されている場合はフィルタリング
     const userCredentials = userId 
-      ? storedCredentials.filter((cred: any) => cred.userId === userId)
+      ? storedCredentials.filter(cred => cred.userId === userId)
       : storedCredentials;
 
     if (userCredentials.length === 0) {
@@ -167,7 +178,7 @@ export async function authenticateWithBiometric(userId?: string): Promise<boolea
     // 認証オプション
     const publicKeyCredentialRequestOptions: PublicKeyCredentialRequestOptions = {
       challenge: challenge,
-      allowCredentials: userCredentials.map((cred: any) => ({
+      allowCredentials: userCredentials.map(cred => ({
         id: base64urlToBuffer(cred.credentialId),
         type: 'public-key' as PublicKeyCredentialType,
         transports: ['internal'] as AuthenticatorTransport[],
@@ -186,7 +197,7 @@ export async function authenticateWithBiometric(userId?: string): Promise<boolea
     }
 
     // 認証成功
-    const response = credential.response as AuthenticatorAssertionResponse;
+    // const response = credential.response as AuthenticatorAssertionResponse;
     
     // セッションに認証情報を保存
     sessionStorage.setItem('biometric-authenticated', 'true');
@@ -194,13 +205,17 @@ export async function authenticateWithBiometric(userId?: string): Promise<boolea
     
     toast.success('生体認証に成功しました');
     return true;
-  } catch (error: any) {
+  } catch (error) {
     console.error('生体認証エラー:', error);
     
-    if (error.name === 'NotAllowedError') {
-      toast.error('生体認証がキャンセルされました');
-    } else if (error.name === 'NotSupportedError') {
-      toast.error('この端末は生体認証に対応していません');
+    if (error instanceof Error) {
+      if (error.name === 'NotAllowedError') {
+        toast.error('生体認証がキャンセルされました');
+      } else if (error.name === 'NotSupportedError') {
+        toast.error('この端末は生体認証に対応していません');
+      } else {
+        toast.error('生体認証に失敗しました');
+      }
     } else {
       toast.error('生体認証に失敗しました');
     }
@@ -212,8 +227,12 @@ export async function authenticateWithBiometric(userId?: string): Promise<boolea
 // 生体認証の削除
 export function removeBiometric(userId: string): boolean {
   try {
-    const storedCredentials = JSON.parse(localStorage.getItem('biometric-credentials') || '[]');
-    const filteredCredentials = storedCredentials.filter((cred: any) => cred.userId !== userId);
+    const storedCredentials = JSON.parse(localStorage.getItem('biometric-credentials') || '[]') as Array<{
+      userId: string;
+      credentialId: string;
+      createdAt: string;
+    }>;
+    const filteredCredentials = storedCredentials.filter(cred => cred.userId !== userId);
     localStorage.setItem('biometric-credentials', JSON.stringify(filteredCredentials));
     
     toast.success('生体認証を削除しました');
@@ -228,10 +247,14 @@ export function removeBiometric(userId: string): boolean {
 // 生体認証が登録されているかチェック
 export function isBiometricRegistered(userId?: string): boolean {
   try {
-    const storedCredentials = JSON.parse(localStorage.getItem('biometric-credentials') || '[]');
+    const storedCredentials = JSON.parse(localStorage.getItem('biometric-credentials') || '[]') as Array<{
+      userId: string;
+      credentialId: string;
+      createdAt: string;
+    }>;
     
     if (userId) {
-      return storedCredentials.some((cred: any) => cred.userId === userId);
+      return storedCredentials.some(cred => cred.userId === userId);
     }
     
     return storedCredentials.length > 0;

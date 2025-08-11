@@ -26,7 +26,7 @@ export function BiometricSetup({ userId, username, onClose }: BiometricSetupProp
 
   useEffect(() => {
     checkBiometricStatus();
-  }, [userId]);
+  }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const checkBiometricStatus = async () => {
     const available = await isBiometricAvailable();

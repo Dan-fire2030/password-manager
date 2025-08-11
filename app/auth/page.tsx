@@ -13,7 +13,6 @@ import { Fingerprint } from 'lucide-react'
 import { 
   isBiometricAvailable, 
   isBiometricRegistered, 
-  authenticateWithBiometric,
   registerBiometric 
 } from '@/lib/webauthn'
 import { BiometricPrompt } from '@/components/biometric/biometric-setup'
@@ -33,7 +32,7 @@ export default function AuthPage() {
 
   useEffect(() => {
     checkBiometricStatus()
-  }, [email])
+  }, [email]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const checkBiometricStatus = async () => {
     const available = await isBiometricAvailable()
@@ -219,7 +218,7 @@ export default function AuthPage() {
       // 実際の実装では、生体認証専用のトークンを使用すべきです
       toast.success('生体認証でログインしました')
       router.push('/dashboard')
-    } catch (error) {
+    } catch {
       toast.error('ログインに失敗しました')
     } finally {
       setLoading(false)

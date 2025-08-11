@@ -108,7 +108,7 @@ export async function clearCache(): Promise<void> {
 }
 
 // オフライン用データをキャッシュに保存
-export async function cacheOfflineData(key: string, data: any): Promise<void> {
+export async function cacheOfflineData(key: string, data: unknown): Promise<void> {
   if (typeof window === 'undefined' || !('caches' in window)) {
     return;
   }
@@ -127,7 +127,7 @@ export async function cacheOfflineData(key: string, data: any): Promise<void> {
 }
 
 // オフライン用データをキャッシュから取得
-export async function getOfflineData(key: string): Promise<any | null> {
+export async function getOfflineData(key: string): Promise<unknown | null> {
   if (typeof window === 'undefined' || !('caches' in window)) {
     return null;
   }

@@ -145,6 +145,10 @@ export default function AuthPage() {
         
         // セッション情報を保存（1時間有効）
         saveSession(signInData.user.id, email)
+        
+        // 暗号化キーもローカルストレージにバックアップ（ブラウザ再開用）
+        localStorage.setItem('backup-encryption-key', encryptionKey)
+        localStorage.setItem('backup-user-salt', salt)
 
         // 生体認証が利用可能な場合は登録を促す
         if (biometricAvailable) {
@@ -187,6 +191,10 @@ export default function AuthPage() {
         
         // セッション情報を保存（1時間有効）
         saveSession(authData.user.id, email)
+        
+        // 暗号化キーもローカルストレージにバックアップ（ブラウザ再開用）
+        localStorage.setItem('backup-encryption-key', encryptionKey)
+        localStorage.setItem('backup-user-salt', profile.salt)
 
         toast.success('ログインしました')
         router.push('/dashboard')

@@ -11,6 +11,7 @@ import { toast } from 'sonner'
 import { usePWA } from '@/components/pwa/service-worker-provider'
 import { cacheOfflineData, getOfflineData } from '@/lib/sw-utils'
 import { isSessionValid, clearSession, setupSessionTimer } from '@/lib/auth-utils'
+import { attemptSessionRecovery } from '@/lib/session-recovery'
 import Header from '@/components/password-manager/header'
 import SearchBar from '@/components/password-manager/search-bar'
 import PasswordEntryCard from '@/components/password-manager/password-entry-card'
@@ -121,11 +122,15 @@ export default function DashboardPage() {
       router.push('/auth')
     })
     
-    loadEntries()
+    // データを読み込む前に少し待機（レンダリング後に実行）
+    const loadTimer = setTimeout(() => {
+      loadEntries()
+    }, 100)
     
     // クリーンアップ
     return () => {
       if (timer) clearTimeout(timer)
+      clearTimeout(loadTimer)
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -157,10 +162,25 @@ export default function DashboardPage() {
 
   const loadEntries = async () => {
     try {
-      const encryptionKey = sessionStorage.getItem('encryptionKey')
+      // 暗号化キーの確認・復元
+      let encryptionKey = sessionStorage.getItem('encryptionKey')
+      
+      // SessionStorageにない場合、バックアップから復元を試行
       if (!encryptionKey) {
-        router.push('/auth')
-        return
+        if (attemptSessionRecovery()) {
+          encryptionKey = sessionStorage.getItem('encryptionKey')
+          toast.success('セッションを復元しました')
+        } else {
+          const { data: { user } } = await supabase.auth.getUser()
+          if (!user) {
+            router.push('/auth')
+            return
+          }
+          
+          toast.warning('セッションの復元に失敗しました。再度ログインしてください。')
+          router.push('/auth')
+          return
+        }
       }
 
       // オンライン時の処理
@@ -182,6 +202,9 @@ export default function DashboardPage() {
         // 復号化
         const decryptedEntries = data.map(entry => {
           try {
+            if (!encryptionKey) {
+              throw new Error('暗号化キーが見つかりません')
+            }
             const decryptedData = JSON.parse(decryptData(entry.encrypted_data, encryptionKey))
             return {
               id: entry.id,
@@ -191,6 +214,9 @@ export default function DashboardPage() {
             }
           } catch (e) {
             console.error('復号化エラー:', e)
+            // 復号化に失敗した場合は再ログインを促す
+            toast.error('データの復号化に失敗しました。再度ログインしてください。')
+            router.push('/auth')
             return null
           }
         }).filter(Boolean) as PasswordEntry[]
@@ -201,8 +227,16 @@ export default function DashboardPage() {
         // オンライン時にデータをキャッシュに保存
         await cacheOfflineData('password-entries', decryptedEntries)
         
+        // 暗号化キーもキャッシュ（セキュリティ上注意が必要）
+        await cacheOfflineData('encryption-key', encryptionKey)
+        
       } else {
-        // オフライン時: キャッシュからデータを取得
+        // オフライン時: キャッシュからデータと暗号化キーを取得
+        const cachedKey = await getOfflineData('encryption-key') as string
+        if (cachedKey) {
+          sessionStorage.setItem('encryptionKey', cachedKey)
+        }
+        
         const cachedEntries = await getOfflineData('password-entries')
         if (cachedEntries && Array.isArray(cachedEntries)) {
           setEntries(cachedEntries)
@@ -219,13 +253,22 @@ export default function DashboardPage() {
       
       // オンラインでエラーが発生した場合はオフラインデータを試行
       if (isOnline) {
-        const cachedEntries = await getOfflineData('password-entries')
-        if (cachedEntries && Array.isArray(cachedEntries)) {
-          setEntries(cachedEntries)
-          setIsOfflineData(true)
-          toast.warning('サーバーに接続できません。キャッシュデータを表示しています')
-        } else {
-          toast.error('データの読み込みに失敗しました')
+        try {
+          const cachedKey = await getOfflineData('encryption-key') as string
+          const cachedEntries = await getOfflineData('password-entries')
+          
+          if (cachedKey && cachedEntries && Array.isArray(cachedEntries)) {
+            sessionStorage.setItem('encryptionKey', cachedKey)
+            setEntries(cachedEntries)
+            setIsOfflineData(true)
+            toast.warning('サーバーに接続できません。キャッシュデータを表示しています')
+          } else {
+            toast.error('データの読み込みに失敗しました。再度ログインしてください。')
+            router.push('/auth')
+          }
+        } catch {
+          toast.error('データの読み込みに失敗しました。再度ログインしてください。')
+          router.push('/auth')
         }
       } else {
         toast.error('オフラインデータの読み込みに失敗しました')
@@ -334,12 +377,19 @@ export default function DashboardPage() {
       await supabase.auth.signOut()
       clearSession() // セッション情報をクリア
       sessionStorage.removeItem('encryptionKey')
+      
+      // バックアップデータもクリア
+      localStorage.removeItem('backup-encryption-key')
+      localStorage.removeItem('backup-user-salt')
+      
       router.push('/auth')
     } catch (error) {
       console.error('Logout error:', error)
       // エラーが発生してもセッションをクリアして認証ページに移動
       clearSession()
       sessionStorage.removeItem('encryptionKey')
+      localStorage.removeItem('backup-encryption-key')
+      localStorage.removeItem('backup-user-salt')
       router.push('/auth')
     }
   }

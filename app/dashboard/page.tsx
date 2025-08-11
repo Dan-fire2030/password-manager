@@ -6,12 +6,10 @@ import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Key, Plus, Wifi, WifiOff } from 'lucide-react'
-import { encryptData, decryptData, generatePassword } from '@/lib/crypto'
+import { encryptData, generatePassword } from '@/lib/crypto'
 import { toast } from 'sonner'
 import { usePWA } from '@/components/pwa/service-worker-provider'
-import { cacheOfflineData, getOfflineData } from '@/lib/sw-utils'
-import { isSessionValid, clearSession, setupSessionTimer } from '@/lib/auth-utils'
-import { attemptSessionRecovery } from '@/lib/session-recovery'
+import { clearSession } from '@/lib/auth-utils'
 import Header from '@/components/password-manager/header'
 import SearchBar from '@/components/password-manager/search-bar'
 import PasswordEntryCard from '@/components/password-manager/password-entry-card'
@@ -53,7 +51,6 @@ export default function DashboardPage() {
   const [showEditForm, setShowEditForm] = useState(false)
   const [showPasswords, setShowPasswords] = useState<{ [key: string]: boolean }>({})
   const [loading, setLoading] = useState(true)
-  const [isOfflineData, setIsOfflineData] = useState(false)
   const router = useRouter()
   const supabase = createClient()
   const { isOnline } = usePWA()
@@ -109,56 +106,25 @@ export default function DashboardPage() {
   })
 
   useEffect(() => {
-    // Service Worker の準備を待つ
-    const initTimer = setTimeout(() => {
-      setIsServiceWorkerReady(true)
-    }, 500) // 0.5秒待機
-
-    return () => clearTimeout(initTimer)
+    console.log('[Dashboard] 初期化useEffect実行')
+    // Service Worker の準備を待たずに即座に準備完了とする
+    setIsServiceWorkerReady(true)
   }, [])
 
   useEffect(() => {
-    if (!isServiceWorkerReady) return
+    console.log('[Dashboard] useEffect実行 - isServiceWorkerReady:', isServiceWorkerReady)
+    
+    if (!isServiceWorkerReady) {
+      console.log('[Dashboard] Service Worker準備待ち中...')
+      return
+    }
 
-    // ミドルウェアが認証をチェック済みなので、ここではデータの読み込みのみ
-    // セッションの有効性をチェック（ブラウザ再起動後の復元確認）
-    if (!isSessionValid()) {
-      // セッション復元を試行
-      const recovered = attemptSessionRecovery()
-      if (!recovered) {
-        toast.error('セッションが期限切れです。再度ログインしてください。')
-        router.push('/auth')
-        return
-      }
-    }
+    console.log('[Dashboard] データ読み込み開始')
     
-    // セッションタイマーを設定（自動ログアウト）
-    const timer = setupSessionTimer(() => {
-      toast.error('セッションが期限切れになりました。')
-      clearSession()
-      router.push('/auth')
-    })
+    // データ読み込みを直接実行（タイマー無し）
+    loadEntries()
     
-    // データを読み込む前に少し待機（レンダリング後に実行）
-    const loadTimer = setTimeout(() => {
-      loadEntries()
-    }, 100)
-    
-    // クリーンアップ
-    return () => {
-      if (timer) clearTimeout(timer)
-      clearTimeout(loadTimer)
-    }
-  }, [isServiceWorkerReady]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // オンライン状態の変化を監視
-  useEffect(() => {
-    if (isOnline && isOfflineData) {
-      // オフラインからオンラインに復帰した場合、データを再読み込み
-      loadEntries()
-      toast.success('オンラインに復帰しました。データを同期しています')
-    }
-  }, [isOnline, isOfflineData]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isServiceWorkerReady])
 
   useEffect(() => {
     // 検索フィルタリング
@@ -178,149 +144,16 @@ export default function DashboardPage() {
   }, [searchQuery, categoryFilter, entries])
 
   const loadEntries = async () => {
+    console.log('[Dashboard] loadEntries開始')
+    
     try {
-      // 暗号化キーの確認・復元
-      let encryptionKey = sessionStorage.getItem('encryptionKey')
-      
-      // SessionStorageにない場合、バックアップから復元を試行
-      if (!encryptionKey) {
-        if (attemptSessionRecovery()) {
-          encryptionKey = sessionStorage.getItem('encryptionKey')
-          toast.success('セッションを復元しました')
-        } else {
-          // バックアップからの復元に失敗した場合、認証ページに戻る
-          toast.warning('セッションの復元に失敗しました。再度ログインしてください。')
-          setLoading(false)
-          router.push('/auth')
-          return
-        }
-      }
-
-      // オンライン時の処理
-      if (isOnline) {
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) {
-          setLoading(false)
-          router.push('/auth')
-          return
-        }
-
-        const { data, error } = await supabase
-          .from('password_entries')
-          .select('*')
-          .eq('user_id', user.id)
-          .order('updated_at', { ascending: false })
-
-        if (error) {
-          console.error('Supabase query error:', error)
-          throw error
-        }
-
-        // データが空の場合（新規ユーザー）の処理
-        if (!data || data.length === 0) {
-          setEntries([])
-          setIsOfflineData(false)
-          try {
-            await cacheOfflineData('password-entries', [])
-            await cacheOfflineData('encryption-key', encryptionKey)
-          } catch (cacheError) {
-            console.warn('キャッシュの保存に失敗しました:', cacheError)
-          }
-          return
-        }
-
-        // 復号化
-        const decryptedEntries = data.map(entry => {
-          try {
-            if (!encryptionKey) {
-              throw new Error('暗号化キーが見つかりません')
-            }
-            const decryptedData = JSON.parse(decryptData(entry.encrypted_data, encryptionKey))
-            return {
-              id: entry.id,
-              ...decryptedData,
-              createdAt: entry.created_at,
-              updatedAt: entry.updated_at,
-            }
-          } catch (e) {
-            console.error('復号化エラー:', e)
-            // 復号化に失敗した場合は再ログインを促す
-            toast.error('データの復号化に失敗しました。再度ログインしてください。')
-            setLoading(false)
-            router.push('/auth')
-            return null
-          }
-        }).filter(Boolean) as PasswordEntry[]
-
-        setEntries(decryptedEntries)
-        setIsOfflineData(false)
-        
-        // オンライン時にデータをキャッシュに保存
-        try {
-          await cacheOfflineData('password-entries', decryptedEntries)
-          await cacheOfflineData('encryption-key', encryptionKey)
-        } catch (cacheError) {
-          console.warn('キャッシュの保存に失敗しました:', cacheError)
-          // キャッシュエラーは致命的ではないため続行
-        }
-        
-      } else {
-        // オフライン時: キャッシュからデータと暗号化キーを取得
-        try {
-          const cachedKey = await getOfflineData('encryption-key') as string
-          if (cachedKey) {
-            sessionStorage.setItem('encryptionKey', cachedKey)
-          }
-          
-          const cachedEntries = await getOfflineData('password-entries')
-          if (cachedEntries && Array.isArray(cachedEntries)) {
-            setEntries(cachedEntries)
-            setIsOfflineData(true)
-            toast.info('オフラインモード: キャッシュされたデータを表示しています')
-          } else {
-            setEntries([])
-            setIsOfflineData(true)
-            toast.warning('オフラインデータが見つかりません')
-          }
-        } catch (offlineError) {
-          console.warn('オフラインデータの読み込みに失敗:', offlineError)
-          setEntries([])
-          setIsOfflineData(true)
-          toast.warning('オフラインデータの読み込みに失敗しました')
-        }
-      }
+      // まず単純にローディングを停止してみる（デバッグ用）
+      console.log('[Dashboard] 簡素化テスト - ローディング停止')
+      setEntries([])
+      setLoading(false)
+      return
     } catch (error) {
-      console.error('データの読み込みエラー:', error)
-      
-      // オンラインでエラーが発生した場合はオフラインデータを試行
-      if (isOnline) {
-        try {
-          const cachedKey = await getOfflineData('encryption-key') as string
-          const cachedEntries = await getOfflineData('password-entries')
-          
-          if (cachedKey && cachedEntries && Array.isArray(cachedEntries)) {
-            sessionStorage.setItem('encryptionKey', cachedKey)
-            setEntries(cachedEntries)
-            setIsOfflineData(true)
-            toast.warning('サーバーに接続できません。キャッシュデータを表示しています')
-          } else {
-            toast.error('データの読み込みに失敗しました。再度ログインしてください。')
-            setLoading(false)
-            router.push('/auth')
-            return
-          }
-        } catch {
-          toast.error('データの読み込みに失敗しました。再度ログインしてください。')
-          setLoading(false)
-          router.push('/auth')
-          return
-        }
-      } else {
-        toast.error('オフラインデータの読み込みに失敗しました')
-        setEntries([])
-        setIsOfflineData(true)
-      }
-    } finally {
+      console.error('[Dashboard] loadEntries エラー:', error)
       setLoading(false)
     }
   }
@@ -755,11 +588,6 @@ export default function DashboardPage() {
               <p className="text-xs text-slate-600 font-semibold">
                 {entries.length}件のパスワードを安全に管理中
               </p>
-              {isOfflineData && (
-                <p className="text-xs text-amber-600 mt-1">
-                  オフラインデータを表示中
-                </p>
-              )}
             </div>
           </div>
         </div>

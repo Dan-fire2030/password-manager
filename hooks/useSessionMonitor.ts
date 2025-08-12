@@ -46,7 +46,14 @@ export function useSessionMonitor({
       return false;
     }
 
-    const sessionData = JSON.parse(session);
+    // getSession already returns parsed session data
+    const sessionRaw = sessionStorage.getItem('auth-session') || localStorage.getItem('auth-session');
+    if (!sessionRaw) {
+      handleSessionExpired();
+      return false;
+    }
+    
+    const sessionData = JSON.parse(sessionRaw);
     const sessionTimestamp = sessionData.timestamp;
     const now = Date.now();
     const timeSinceSession = now - sessionTimestamp;

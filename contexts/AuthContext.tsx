@@ -31,8 +31,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     
     // PWA環境での特別な処理
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const isPWA = window.matchMedia('(display-mode: standalone)').matches || 
-                  window.navigator.standalone === true;
+                  (window.navigator as any).standalone === true;
     
     if (isPWA) {
       console.log('[PWA] Session expired in PWA environment');

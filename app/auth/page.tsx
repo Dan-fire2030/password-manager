@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -19,7 +19,7 @@ import {
 import { BiometricPrompt } from '@/components/biometric/biometric-setup'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 
-export default function AuthPage() {
+function AuthPageContent() {
   const [isSignUp, setIsSignUp] = useState(false)
   const [email, setEmail] = useState('')
   const [pin, setPin] = useState('')
@@ -462,5 +462,13 @@ export default function AuthPage() {
         />
       )}
     </div>
+  )
+}
+
+export default function AuthPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <AuthPageContent />
+    </Suspense>
   )
 }

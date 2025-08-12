@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
 
 import { createBrowserClient } from '@supabase/ssr';
@@ -12,7 +13,7 @@ export function createClientWithInterceptor() {
   const originalFrom = supabase.from.bind(supabase);
   
   supabase.from = new Proxy(originalFrom, {
-    apply(target, thisArg, argumentsList) {
+    apply(target: any, thisArg, argumentsList: any[]) {
       const result = target(...argumentsList);
       
       const methods = ['select', 'insert', 'update', 'delete', 'upsert'];
@@ -21,14 +22,14 @@ export function createClientWithInterceptor() {
         const original = result[method];
         if (original) {
           result[method] = new Proxy(original.bind(result), {
-            apply(target, thisArg, args) {
+            apply(target: any, thisArg, args: any[]) {
               const query = target(...args);
               
               const originalThen = query.then;
-              query.then = function(onFulfilled?: any, onRejected?: any) {
+              query.then = function(onFulfilled?: ((value: unknown) => unknown) | null | undefined, onRejected?: ((reason: unknown) => unknown) | null | undefined) {
                 return originalThen.call(
                   this,
-                  (response: any) => {
+                  (response: { error?: { message?: string; code?: string } }) => {
                     if (response?.error) {
                       if (response.error.message?.includes('JWT') || 
                           response.error.message?.includes('token') ||
@@ -61,13 +62,13 @@ export function createClientWithInterceptor() {
     }
   });
 
-  const originalAuth = supabase.auth;
+  const originalAuth: any = supabase.auth;
   const authMethods = ['getSession', 'getUser', 'refreshSession'];
   
   authMethods.forEach(method => {
     const original = originalAuth[method];
     if (original) {
-      originalAuth[method] = async function(...args: any[]) {
+      originalAuth[method] = async function(...args: unknown[]) {
         try {
           const result = await original.apply(this, args);
           

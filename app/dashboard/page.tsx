@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
+import { createClientWithInterceptor } from '@/lib/supabase/client-with-interceptor'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Key, Plus, Wifi, WifiOff } from 'lucide-react'
@@ -54,7 +54,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [isOfflineData, setIsOfflineData] = useState(false)
   const router = useRouter()
-  const supabase = createClient()
+  const supabase = createClientWithInterceptor()
   const { isOnline } = usePWA()
   const [isServiceWorkerReady, setIsServiceWorkerReady] = useState(false)
 
@@ -157,7 +157,7 @@ export default function DashboardPage() {
             toast.warning('PWA環境でセッション情報が見つかりません。再度ログインしてください。')
             setLoading(false) // 強制的にローディング停止
             setTimeout(() => {
-              router.push('/auth')
+              router.push('/auth?session_expired=true')
             }, 100) // 少し遅延させてローディング停止を確実にする
             return
           }
@@ -169,7 +169,7 @@ export default function DashboardPage() {
           toast.error('セッションが期限切れです。再度ログインしてください。')
           setLoading(false)
           setTimeout(() => {
-            router.push('/auth')
+            router.push('/auth?session_expired=true')
           }, 100)
           return
         }
@@ -180,7 +180,7 @@ export default function DashboardPage() {
       toast.error('セッション確認中にエラーが発生しました。再度ログインしてください。')
       setLoading(false)
       setTimeout(() => {
-        router.push('/auth')
+        router.push('/auth?session_expired=true')
       }, 100)
       return
     }
@@ -189,7 +189,15 @@ export default function DashboardPage() {
     const timer = setupSessionTimer(() => {
       toast.error('セッションが期限切れになりました。')
       clearSession()
-      router.push('/auth')
+      
+      // PWA環境の場合はService Workerに通知
+      if (isPWA && 'serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          type: 'SESSION_EXPIRED'
+        })
+      }
+      
+      router.push('/auth?session_expired=true')
     })
     
     console.log('[Dashboard] データ読み込み開始')

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { Toaster } from "sonner";
 import { ServiceWorkerProvider, OfflineIndicator, PWAInstallPrompt } from "@/components/pwa/service-worker-provider";
+import { AuthProvider } from "@/contexts/AuthContext";
 
 export const metadata: Metadata = {
   title: "パスマネ",
@@ -77,10 +78,12 @@ export default function RootLayout({
       </head>
       <body className="antialiased">
         <ServiceWorkerProvider>
-          <OfflineIndicator />
-          {children}
-          <PWAInstallPrompt />
-          <Toaster richColors position="top-center" />
+          <AuthProvider>
+            <OfflineIndicator />
+            {children}
+            <PWAInstallPrompt />
+            <Toaster richColors position="top-center" />
+          </AuthProvider>
         </ServiceWorkerProvider>
       </body>
     </html>

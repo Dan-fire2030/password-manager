@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { generateSalt, deriveKeyFromPin } from '@/lib/crypto'
 import { toast } from 'sonner'
-import { Fingerprint } from 'lucide-react'
+import { Fingerprint, AlertCircle } from 'lucide-react'
 import { saveSession, isSessionValid } from '@/lib/auth-utils'
 import { 
   isBiometricAvailable, 
@@ -17,6 +17,7 @@ import {
   registerBiometric 
 } from '@/lib/webauthn'
 import { BiometricPrompt } from '@/components/biometric/biometric-setup'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 
 export default function AuthPage() {
   const [isSignUp, setIsSignUp] = useState(false)
@@ -29,7 +30,9 @@ export default function AuthPage() {
   const [biometricAvailable, setBiometricAvailable] = useState(false)
   const [biometricRegistered, setBiometricRegistered] = useState(false)
   const router = useRouter()
+  const searchParams = useSearchParams()
   const supabase = createClient()
+  const sessionExpired = searchParams?.get('session_expired') === 'true'
 
   useEffect(() => {
     // 既存のセッションをチェック
@@ -37,7 +40,12 @@ export default function AuthPage() {
       router.push('/dashboard')
     }
     checkBiometricStatus()
-  }, [email]) // eslint-disable-line react-hooks/exhaustive-deps
+    
+    // セッション期限切れメッセージを表示
+    if (sessionExpired) {
+      toast.warning('セッションの有効期限が切れました。再度ログインしてください。')
+    }
+  }, [email, sessionExpired]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const checkBiometricStatus = async () => {
     const available = await isBiometricAvailable()
@@ -433,6 +441,16 @@ export default function AuthPage() {
           </CardFooter>
         </form>
       </Card>
+      
+      {/* セッション期限切れアラート */}
+      {sessionExpired && (
+        <Alert className="mt-4 max-w-md mx-auto border-orange-200 bg-orange-50">
+          <AlertCircle className="h-4 w-4 text-orange-600" />
+          <AlertDescription className="text-orange-800">
+            セッションの有効期限が切れました。再度ログインしてください。
+          </AlertDescription>
+        </Alert>
+      )}
       </div>
       
       {/* 生体認証プロンプト */}

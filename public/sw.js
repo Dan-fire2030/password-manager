@@ -244,4 +244,24 @@ self.addEventListener('message', (event) => {
   if (event.data.type === 'GET_VERSION') {
     event.ports[0].postMessage({ version: CACHE_NAME });
   }
+  
+  // セッション期限切れの処理
+  if (event.data.type === 'SESSION_EXPIRED') {
+    console.log('[SW] Session expired, clearing cache and redirecting');
+    
+    // APIキャッシュをクリア
+    caches.delete(API_CACHE).then(() => {
+      console.log('[SW] API cache cleared');
+    });
+    
+    // すべてのクライアントにセッション期限切れを通知
+    clients.matchAll({ type: 'window' }).then(clients => {
+      clients.forEach(client => {
+        client.postMessage({
+          type: 'SESSION_EXPIRED',
+          redirect: '/auth?session_expired=true'
+        });
+      });
+    });
+  }
 });
